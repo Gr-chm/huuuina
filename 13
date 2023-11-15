@@ -1,0 +1,309 @@
+#include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <stdlib.h>
+#include <string.h>
+struct node{
+	char *wd;
+	int *line_num;
+	off_t *offset_wd;
+	int cnt;
+	struct node *left;
+	struct node *right;
+};
+void printTree(struct node* tree) {
+	if (tree == NULL) return;
+	printTree(tree -> left);
+	printf("%s\n", tree -> wd);
+	printTree(tree -> right);
+	return;
+}
+int add_node(struct node **node_ptr, char *word, int num_str, off_t offset){
+	struct node *tmp =*node_ptr;
+	int size_arr = 8;
+	if (!tmp){
+		tmp =(struct node *)malloc(sizeof(struct node));
+		if (!tmp){
+			fprintf(stderr, "Unknown error\n");
+			exit(1);            
+		}
+		tmp -> wd = word;
+		tmp -> line_num = (int*)malloc(size_arr * sizeof(int));
+		if (!(tmp-> line_num)){
+			fprintf(stderr, "Unknown error\n");
+			free(tmp -> wd);
+			free(tmp);
+			exit(1);		
+		}
+		tmp -> line_num[0] = num_str;
+		tmp -> offset_wd = (off_t *)malloc(size_arr * sizeof(off_t));
+		if (!(tmp-> offset_wd)){
+			fprintf(stderr, "Unknown error\n");
+			free(tmp -> wd);
+			free(tmp -> line_num);
+			free(tmp);
+			exit(1);
+		}
+		tmp -> offset_wd[0] = offset;
+		tmp -> cnt = 1;
+		tmp -> left = NULL;
+		tmp -> right = NULL;
+	}
+	else{
+		int a = strcmp(word, tmp -> wd);
+		if (a > 0) add_node(&(tmp -> right), word, num_str, offset);
+		else if (a < 0) add_node(&(tmp -> left), word, num_str, offset); 
+		else{	
+			int i = tmp -> cnt;
+			if (size_arr == i){
+				size_arr *= 2;
+				tmp -> line_num = (int *)realloc(tmp->line_num, size_arr * sizeof(int));
+				if (!(tmp-> line_num)){
+					fprintf(stderr, "Unknown error\n");
+					exit(1);
+				}
+				tmp -> offset_wd = (off_t *)realloc(tmp->line_num, size_arr * sizeof(int));
+				if (!(tmp-> offset_wd)){
+					fprintf(stderr, "Unknown error\n");
+					exit(1);
+				}
+
+			}
+			tmp -> line_num[i] = num_str;
+			tmp -> offset_wd[i] = offset;
+			(tmp -> cnt)++;
+		}
+	}
+	*node_ptr = tmp;
+}
+struct node * find_word(struct node * tmp, const char * word){
+	if (!tmp){
+		return NULL;
+	}
+	if (strcmp(word, tmp->wd)==0){
+		return tmp;
+	}
+	else if((strcmp(tmp-> wd, word))>0) find_word(tmp->left, word);
+	else find_word(tmp->right, word);
+}
+void free_memory(struct node *tmp){
+	if (tmp != NULL){
+		free(tmp -> wd);
+		free(tmp -> line_num);
+		free(tmp -> offset_wd);
+		free_memory(tmp-> left);
+		free_memory(tmp-> right);
+		free(tmp);
+	}
+}
+int main(int argc, char **argv){
+	if (argc < 4 || argc > 8){
+		fprintf(stderr,  "Incorrect parameters of command line\n");
+		return 1;	
+	}
+	int fd1 = open(argv[1], O_RDWR);
+	if (fd1 == -1){
+		fprintf(stderr, "Can't open file %s\n", argv[1]);
+		return 1;
+	}
+	int num_str = 1, len_wd = 0, size = 8, flag_wd = 0; 
+	off_t offset = 0;
+	char sym;
+	char *word;
+	struct node *begin = NULL, *node_word;
+	while(read(fd1, &sym, 1) > 0){
+		if (sym == ';' || sym == ',' || sym  == '.' || sym  == ' ' || sym == '-' || sym == ':' || sym == '(' || sym == ')' || sym == '\n'){
+			if(flag_wd == 1){
+				if (len_wd == size){
+					size = size *2;
+					word = (char*)realloc(word, size);
+					if (!word){
+						fprintf(stderr, "Unknown error\n");
+						return 1;
+					}
+				}
+				word[len_wd] ='\0';
+				//printf("%s\n", word);
+				add_node(&begin, word, num_str, offset);
+				word == NULL;
+				len_wd = 0;
+				flag_wd = 0;
+				size = 8;
+			}	
+			if (sym == '\n') num_str++;
+		}
+		else{
+			if (flag_wd == 0){
+				word = (char*)malloc(size);
+				 if (!word){
+                                	fprintf(stderr, "Unknown error\n");
+                                	return 1;
+                        		}
+				offset = lseek(fd1, 0, SEEK_CUR) -  sizeof(char);
+				flag_wd = 1;
+			}
+			if (len_wd == size){
+				size*=2;
+				word = (char*)realloc(word, size);
+				if (!word){
+					fprintf(stderr, "Unknown error\n");
+					return 1;
+				}
+			}
+			word[len_wd] = sym;
+			len_wd++;
+		}
+	}
+	if (len_wd){
+		if (len_wd == size){
+			size*=2;
+			word = (char*)realloc(word, size);
+			if (!word){
+				fprintf(stderr, "Unknown error\n");
+				return 1;
+			}
+		}
+		word[len_wd] = '\0';
+		add_node(&begin, word, num_str, offset);
+	}
+	//printf("%d\n", num_str);
+	enum regim {absence, search, replace, diapason} regim;
+	regim = absence;
+	char *word1 = NULL, *word2 = NULL;
+	int loc = 2, d1 = 0, d2 = num_str, vvod_dip;
+	while (loc < argc){
+		if (strcmp(argv[loc], "-s") == 0 || strcmp(argv[loc], "--search") == 0){
+		       if (regim == search || regim == replace || argc < loc + 2){
+				fprintf(stderr,  "Incorrect parameters of command line\n");
+				return 1;
+		       }
+		       regim = search;
+		       word1 = argv[loc+1];
+		       loc += 2;
+		      }
+		else if(strcmp(argv[loc], "-r") == 0 || strcmp(argv[loc], "--replace") == 0){
+                       if (regim == search || regim == replace || argc < loc + 3){
+                                fprintf(stderr,  "Incorrect parameters of command line\n");
+                                return 1;
+                       }
+		       regim = replace;
+                       word1 = argv[loc+1];
+		       word2 = argv[loc+2];
+                       loc += 3;
+                      }
+		else if(strcmp(argv[loc], "-d") == 0 || strcmp(argv[loc], "--diapason") == 0){
+			if (argc < loc + 2){
+				 fprintf(stderr,  "Incorrect parameters of command line\n");
+                                return 1;                        
+			}
+			loc ++;
+			vvod_dip = sscanf(argv[loc],"%d%c", &d1, &sym);
+		       if (vvod_dip != 1){
+		       		fprintf(stderr, "Incorrect command line parameters");
+				return 1;
+			}
+			else{
+				if (argc < loc + 2){
+					if (d1 > num_str || d1 < 0){
+						 fprintf(stderr, "Incorrect diapason\n");
+                               			return 1;
+					}
+				}
+			       if (strcmp(argv[loc+1], "-s") != 0 && strcmp(argv[loc+1], "--search") != 0 && strcmp(argv[loc+1], "-r") != 0 && strcmp(argv[loc+1], "--replace") != 0) {
+                   		loc++;
+                    		if (sscanf(argv[loc], "%d%c", &d2, &sym) != 1) {
+					fprintf(stderr, "Incorrect parameters of command line\n"); 
+					return 1;
+				}
+				loc++;
+			      }
+			}
+			//printf("%d %d\n", d1, d2);
+		       if (d1 > d2|| d1 < 1 || d1 > num_str || d2 >num_str) {
+			       fprintf(stderr, "Incorrect diapason\n"); 
+			       return 1;}
+        		
+		}
+        	else if(argv[loc] != NULL){
+			fprintf(stderr, "Incorrect parameters of command line\n"); 
+			return 1;}
+    
+		}
+	//close(fd1);
+	//int f = open(argv[1], O_RDWR);
+	int f = fd1;
+	node_word = find_word(begin, word1);
+	if (!node_word){
+		return 1;
+	}
+
+	//printf("%s\n", node_word -> wd);
+	int i_node=0, cnt_str=1;
+	int prev=0;
+	char chr;
+	int p =lseek(f, 0, SEEK_SET);
+	if (regim == search){
+		for(int i=0; i < (node_word -> cnt); i++){
+			int cur = (node_word -> line_num)[i];
+			if (prev == cur){}
+			else if (cur >= d1 && cur<= d2){
+				while(cnt_str != cur){
+					read(f,&chr,1); 		
+					if (chr == '\n') cnt_str++;
+				}
+						
+				read(f, &chr, 1);
+				while(chr != '\n'){
+					fprintf(stdout, "%c", chr);
+					read(f, &chr, 1);
+				}
+				cnt_str++;
+				fprintf(stdout, "\n");
+				prev= cur;
+			}
+		}
+	}
+	else{	
+		off_t ptr;
+		for(int i=0; i < (node_word -> cnt); i++){
+                        int cur_str = (node_word -> line_num)[i];
+			off_t cur_off = (node_word -> offset_wd)[i];
+			//printf("%d %ld\n", cur_str, cur_off);
+                        if (cur_str >= d1 && cur_str<= d2){
+				if (prev != cur_str){
+					while(cnt_str != cur_str){
+						read(f, &chr, 1);
+						if (chr == '\n') cnt_str++;
+					}
+				}
+				read(f, &chr, 1);
+				while(chr != '\n' && (lseek(f, 0, SEEK_CUR)-1) != cur_off){
+					fprintf(stdout, "%c", chr);
+					read(f, &chr, 1);
+				}
+				if ((lseek(f, 0, SEEK_CUR)-1) == cur_off){
+                                        fprintf(stdout, "%s", word2);
+                                        lseek(f, strlen(word1)-1, SEEK_CUR);
+					if ((node_word -> line_num)[i+1] != cur_str){
+						 read(f, &chr, 1);
+                               			 while(chr != '\n'){
+                                        		fprintf(stdout, "%c", chr);
+							read(f, &chr, 1);
+						}
+						cnt_str++;
+						fprintf(stdout, "\n");}
+
+                                }
+				prev = cur_str;
+			}
+		
+			}
+		}
+	close(f);
+	free_memory(begin);
+
+//if (node_word == NULL) printf("fail\n");
+//printf("%s %d %ld", node_word -> wd, (node_word -> line_num)[1], (node_word -> offset_wd)[1]);
+//printTree(begin);
+
+}
